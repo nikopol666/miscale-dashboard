@@ -35,14 +35,14 @@ def test_female_formulas():
 
 def test_bmr_over_legacy_male_limit_keeps_formula():
     # Previously this valid measurement jumped to an artificial 5000 kcal.
-    out = compute(133.3, 526, 180, date(1989, 1, 1), True, date(2026, 10, 23))
-    assert out["bmr"] == 2403
+    out = compute(132, 510, 180, date(1989, 1, 1), True, date(2026, 10, 23))
+    assert out["bmr"] == 2387
     assert out["body_fat"] > 0
 
 
 def test_bmr_over_legacy_female_limit_keeps_formula():
     out = compute(240, None, 168, date(1994, 1, 1), False, date(2026, 1, 1))
-    assert out["bmr"] > 2996
+    assert out["bmr"] == 2796
     assert out["bmr"] != 5000
 
 

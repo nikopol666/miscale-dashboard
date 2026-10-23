@@ -1,8 +1,8 @@
-"""Body composition from weight and impedance.
+"""Body composition estimates from a Mi Scale weight and impedance reading.
 
-Open formulas used by openScale (MiScaleLib) and by the body_metrics module of the
-wiecosystem project, which reproduce the numbers of Xiaomi's app (Zepp Life).
-They are bioimpedance estimates: good for trends, not exact or medical measurements.
+Weight and impedance are measured; the remaining outputs are model-based estimates.
+BMR uses the published WHO/Schofield weight-and-age equations (kcal/day).
+The impedance-derived estimates retain the dashboard's legacy Xiaomi-compatible model.
 """
 
 from datetime import date
@@ -10,6 +10,22 @@ from datetime import date
 
 def age_on(birth: date, day: date) -> int:
     return day.year - birth.year - ((day.month, day.day) < (birth.month, birth.day))
+
+
+def _schofield_bmr(weight_kg: float, age: int, male: bool) -> float:
+    """FAO/WHO/UNU Schofield (1985) weight-only BMR, in kcal/day."""
+    if male:
+        table = ((3, 59.512, -30.4), (10, 22.706, 504.3),
+                 (18, 17.686, 658.2), (30, 15.057, 692.2),
+                 (60, 11.472, 873.1), (float("inf"), 11.711, 587.7))
+    else:
+        table = ((3, 58.317, -31.1), (10, 20.317, 485.9),
+                 (18, 13.38, 692.6), (30, 14.818, 486.6),
+                 (60, 8.126, 845.6), (float("inf"), 9.082, 658.5))
+    for upper_age, slope, intercept in table:
+        if age < upper_age:
+            return slope * weight_kg + intercept
+    raise AssertionError("unreachable")
 
 
 def compute(weight: float, impedance: int | None, height_cm: float, birth: date,
@@ -20,28 +36,22 @@ def compute(weight: float, impedance: int | None, height_cm: float, birth: date,
     sex = 1 if male else 0
     out = {"bmi": round(weight / (h / 100) ** 2, 1), "age": age}
 
-    if male:
-        bmr = 877.8 + weight * 14.916 - h * 0.726 - age * 8.976
-    else:
-        bmr = 864.6 + weight * 10.2036 - h * 0.39336 - age * 6.204
-    # The legacy body_metrics library replaced results above 2322/2996 with
-    # 5000 kcal, which is a sentinel, not a plausible metabolic estimate.
-    out["bmr"] = round(min(max(bmr, 500), 10000))
+    out["bmr"] = round(min(max(_schofield_bmr(weight, age, male), 500), 5000))
 
     if sex == 0:
-        if weight > (13 - h * 0.5) * -1:
-            sub = (h * 1.45 + h * 0.1158 * h) - 120
+        if weight > h * 0.5 - 13:
+            sub = h * 1.45 + h * 0.1158 * h - 120
             visceral = (weight * 500 / sub - 6) + age * 0.07
         else:
-            sub = 0.691 + h * -0.0024 + h * -0.0024
-            visceral = ((h * 0.027 - sub * weight) * -1) + age * 0.07 - age
+            # The previous version accidentally subtracted height twice and age once.
+            visceral = weight * (0.691 - 0.0024 * h) - 0.027 * h - 10.5 + age * 0.07
     else:
-        if h < weight * 1.6:
-            sub = ((h * 0.4) - (h * (h * 0.0826))) * -1
-            visceral = (weight * 305) / (sub + 48) - 2.9 + age * 0.15
+        if h < weight * 1.6 + 63:
+            sub = h * 0.0826 * h - h * 0.4
+            visceral = weight * 305 / (sub + 48) - 2.9 + age * 0.15
         else:
-            sub = 0.765 + h * -0.0015
-            visceral = ((h * 0.143 - weight * sub) * -1) + age * 0.15 - 5
+            sub = 0.765 - h * 0.0015
+            visceral = weight * sub - h * 0.143 + age * 0.15 - 5
     out["visceral_fat"] = round(min(max(visceral, 1), 50), 1)
 
     if not impedance:
@@ -60,25 +70,21 @@ def compute(weight: float, impedance: int | None, height_cm: float, birth: date,
     elif sex == 0 and weight < 50:
         coeff = 1.02 * (1.03 if h > 160 else 1)
     fat = (1 - ((lbm_coeff - lbm_sub) * coeff) / weight) * 100
-    if fat > 63:
-        fat = 75
+    # Avoid discontinuities like 63.01% jumping to exactly 75%.
     fat = min(max(fat, 5), 75)
 
     base = 0.245691014 if sex == 0 else 0.18016894
     bone = (base - lbm_coeff * 0.05158) * -1
     bone = bone + 0.1 if bone > 2.2 else bone - 0.1
-    if (sex == 0 and bone > 5.1) or (sex == 1 and bone > 5.2):
-        bone = 8
     bone = min(max(bone, 0.5), 8)
 
-    muscle = weight - fat * 0.01 * weight - bone
-    if (sex == 0 and muscle >= 84) or (sex == 1 and muscle >= 93.5):
-        muscle = 120
+    # Muscle is the residual of the lean mass after bone; no artificial 120kg spike.
+    muscle = max(0, weight - fat * 0.01 * weight - bone)
 
     water = (100 - fat) * 0.7
     water *= 1.02 if water < 50 else 0.98
-
-    protein = muscle / weight * 100 - water
+    water = min(max(water, 35), 75)
+    protein = min(max(muscle / weight * 100 - water, 5), 32)
 
     out.update({
         "body_fat": round(fat, 1),
