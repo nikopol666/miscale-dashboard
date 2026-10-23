@@ -113,35 +113,46 @@ class ScaleListener:
                     adv.manufacturer_data, adv.service_uuids)
 
     async def run_esphome(self):
-        """Scan through a remote ESPHome Bluetooth Proxy instead of host BlueZ."""
+        """Receive advertisements from a remote ESPHome Bluetooth Proxy, even in passive mode."""
         import habluetooth
-        from bleak import BleakScanner
         from bleak_esphome import APIConnectionManager
+
+        if not self.address:
+            self.error = "MISCALE_SCALE_MAC must be set when using ESPHome Bluetooth Proxy"
+            log.error(self.error)
+            return
 
         host = os.environ["MISCALE_ESPHOME_HOST"].strip()
         key = os.environ.get("MISCALE_ESPHOME_API_KEY", "").strip() or None
-        manager = APIConnectionManager({"address": host, "noise_psk": key})
-        await habluetooth.BluetoothManager().async_setup()
-        connection = asyncio.create_task(manager.start())
+        bluetooth = habluetooth.BluetoothManager()
+        await bluetooth.async_setup()
+
+        def on_advertisement(info):
+            self.handle(info.address, info.name, info.rssi, info.service_data,
+                        info.manufacturer_data, info.service_uuids)
+
+        unsubscribe = habluetooth.get_manager().async_register_advertisement_callback(
+            on_advertisement, self.address
+        )
         try:
-            # Allow the proxy to connect and register its remote scanner.
-            await asyncio.sleep(5)
             while True:
+                manager = APIConnectionManager({"address": host, "noise_psk": key})
                 try:
-                    async with BleakScanner(self._callback, scanning_mode="passive"):
-                        log.info("listening through ESPHome Bluetooth Proxy: %s", host)
-                        self.error = None
-                        await asyncio.Event().wait()
+                    await asyncio.wait_for(manager.start(), timeout=45)
+                    self.error = None
+                    log.info("Listening for Mi Scale through ESPHome Bluetooth Proxy at %s", host)
+                    await asyncio.Event().wait()
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
                     self.error = str(exc)
-                    log.exception("ESPHome BLE scanner failed; retrying in 10 s")
-                    await asyncio.sleep(10)
+                    log.exception("ESPHome Bluetooth Proxy connection failed; retrying in 10 s")
+                finally:
+                    await manager.stop()
+                await asyncio.sleep(10)
         finally:
-            connection.cancel()
-            await asyncio.gather(connection, return_exceptions=True)
-            await manager.stop()
+            unsubscribe()
+            bluetooth.async_stop()
 
     async def run(self):
         if os.environ.get("MISCALE_ESPHOME_HOST", "").strip():

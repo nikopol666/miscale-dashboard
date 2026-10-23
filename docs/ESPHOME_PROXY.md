@@ -14,3 +14,5 @@ The remote backend uses `bleak-esphome` and ESPHome's Native API on port 6053. N
 Keep secrets in Portainer environment variables, never in the public Git repository. A separate ESPHome proxy can replace the current one just by changing its address.
 
 **Status:** The code is added but needs an end-to-end test with a live ESPHome proxy and scale before enabling automatic production container updates. Upstream sync conflicts will stop publication.
+
+In proxy mode, `MISCALE_SCALE_MAC` is required to subscribe to advertisements from that scale. The integration reads per-address advertisement events directly from `habluetooth`, so passive ESPHome firmware (`bluetooth_proxy.active: false`) works without a local BlueZ adapter. After the first connection, `bleak-esphome` automatically reconnects if the proxy drops offline.
