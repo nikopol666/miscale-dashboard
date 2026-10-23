@@ -32,3 +32,21 @@ def test_higher_impedance_means_more_fat():
 def test_female_formulas():
     out = compute(60, 550, 165, date(1995, 5, 5), False, date(2026, 1, 1))
     assert 15 < out["body_fat"] < 45
+
+def test_bmr_over_legacy_male_limit_keeps_formula():
+    # Previously this valid measurement jumped to an artificial 5000 kcal.
+    out = compute(133.3, 526, 180, date(1989, 1, 1), True, date(2026, 10, 23))
+    assert out["bmr"] == 2403
+    assert out["body_fat"] > 0
+
+
+def test_bmr_over_legacy_female_limit_keeps_formula():
+    out = compute(240, None, 168, date(1994, 1, 1), False, date(2026, 1, 1))
+    assert out["bmr"] > 2996
+    assert out["bmr"] != 5000
+
+
+def test_bmr_has_no_discontinuity_near_old_limit():
+    low = compute(127, None, 180, date(1989, 1, 1), True, date(2026, 10, 23))["bmr"]
+    high = compute(128, None, 180, date(1989, 1, 1), True, date(2026, 10, 23))["bmr"]
+    assert 0 < high - low < 25

@@ -22,10 +22,10 @@ def compute(weight: float, impedance: int | None, height_cm: float, birth: date,
 
     if male:
         bmr = 877.8 + weight * 14.916 - h * 0.726 - age * 8.976
-        bmr = 5000 if bmr > 2322 else bmr
     else:
         bmr = 864.6 + weight * 10.2036 - h * 0.39336 - age * 6.204
-        bmr = 5000 if bmr > 2996 else bmr
+    # The legacy body_metrics library replaced results above 2322/2996 with
+    # 5000 kcal, which is a sentinel, not a plausible metabolic estimate.
     out["bmr"] = round(min(max(bmr, 500), 10000))
 
     if sex == 0:
