@@ -1,3 +1,4 @@
 fastapi==0.115.12
 uvicorn[standard]==0.34.2
-bleak==1.1.1
+bleak==3.0.2
+bleak-esphome==4.1.0

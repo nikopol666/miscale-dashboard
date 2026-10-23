@@ -14,6 +14,7 @@ the Body Composition service (0x181B) with 13 bytes of service data:
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -111,7 +112,41 @@ class ScaleListener:
         self.handle(device.address, adv.local_name or device.name, adv.rssi, adv.service_data,
                     adv.manufacturer_data, adv.service_uuids)
 
+    async def run_esphome(self):
+        """Scan through a remote ESPHome Bluetooth Proxy instead of host BlueZ."""
+        import habluetooth
+        from bleak import BleakScanner
+        from bleak_esphome import APIConnectionManager
+
+        host = os.environ["MISCALE_ESPHOME_HOST"].strip()
+        key = os.environ.get("MISCALE_ESPHOME_API_KEY", "").strip() or None
+        manager = APIConnectionManager({"address": host, "noise_psk": key})
+        await habluetooth.BluetoothManager().async_setup()
+        connection = asyncio.create_task(manager.start())
+        try:
+            # Allow the proxy to connect and register its remote scanner.
+            await asyncio.sleep(5)
+            while True:
+                try:
+                    async with BleakScanner(self._callback, scanning_mode="passive"):
+                        log.info("listening through ESPHome Bluetooth Proxy: %s", host)
+                        self.error = None
+                        await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    self.error = str(exc)
+                    log.exception("ESPHome BLE scanner failed; retrying in 10 s")
+                    await asyncio.sleep(10)
+        finally:
+            connection.cancel()
+            await asyncio.gather(connection, return_exceptions=True)
+            await manager.stop()
+
     async def run(self):
+        if os.environ.get("MISCALE_ESPHOME_HOST", "").strip():
+            await self.run_esphome()
+            return
         from bleak import BleakScanner
 
         while True:
